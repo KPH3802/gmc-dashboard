@@ -9,13 +9,13 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{--bg:#0a0e1a;--card:#111827;--card2:#1a2236;--border:#1e293b;--red:#A52818;--navy:#1C3560;--green:#00e676;--neg:#ef5350;--text:#e0e6f0;--muted:#64748b;--amber:#f59e0b}
-body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;overflow-x:hidden}
+body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;overflow:hidden;height:100vh;display:flex;flex-direction:column}
 .mono{font-family:'JetBrains Mono',monospace}
 
 /* Header */
-.header{display:flex;align-items:center;justify-content:space-between;padding:12px 24px;background:#0d1117;border-bottom:2px solid var(--red)}
+.header{display:flex;align-items:center;justify-content:space-between;padding:7px 24px;background:#0d1117;border-bottom:2px solid var(--red)}
 .header-left{display:flex;align-items:center;gap:12px}
-.header-left img{height:40px;width:40px;border-radius:50%}
+.header-left img{height:30px;width:30px;border-radius:50%}
 .header-left h1{font-size:15px;font-weight:700;letter-spacing:2px;color:#fff}
 .header-center{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--muted)}
 .header-right{display:flex;align-items:center;gap:16px;font-size:12px;color:var(--muted)}
@@ -27,7 +27,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;overf
 .refresh-ring .fill{stroke:var(--red);stroke-dasharray:62.83;stroke-dashoffset:0;transition:stroke-dashoffset 1s linear}
 
 /* Ticker tape */
-.ticker-tape{background:var(--red);overflow:hidden;white-space:nowrap;padding:6px 0;font-size:12px;font-family:'JetBrains Mono',monospace}
+.ticker-tape{background:var(--red);overflow:hidden;white-space:nowrap;padding:3px 0;font-size:11px;font-family:'JetBrains Mono',monospace}
 .ticker-tape .scroll{display:inline-block;animation:scroll 60s linear infinite}
 .ticker-tape .item{display:inline-block;padding:0 18px}
 .ticker-tape .up{color:#c8f7c5}
@@ -35,18 +35,18 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;overf
 @keyframes scroll{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
 
 /* Grid */
-.container{width:100%;padding:16px 24px;box-sizing:border-box}
-.row{display:grid;gap:16px;margin-bottom:16px}
+.container{width:100%;padding:4px 16px;box-sizing:border-box;flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column}
+.row{display:grid;gap:6px;margin-bottom:6px}
 .row-3{grid-template-columns:repeat(3,1fr)}
 
 /* Two-column main layout */
-.main-columns{display:grid;grid-template-columns:65fr 35fr;gap:16px;align-items:start}
+.main-columns{display:grid;grid-template-columns:65fr 35fr;gap:10px;flex:1;overflow:hidden;min-height:0}
 
 /* Cards */
-.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px;position:relative;overflow:hidden}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;position:relative;overflow:hidden}
 .card-red{border-top:3px solid var(--red)}
-.card h3{font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);margin-bottom:10px}
-.big-num{font-family:'JetBrains Mono',monospace;font-size:28px;font-weight:700}
+.card h3{font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);margin-bottom:6px}
+.big-num{font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700}
 .sub-text{font-size:11px;color:var(--muted);margin-top:4px}
 .pos{color:var(--green)}.neg{color:var(--neg)}.stale{color:var(--amber)}
 
@@ -55,12 +55,12 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;overf
 .tab{padding:6px 16px;font-size:11px;letter-spacing:1px;text-transform:uppercase;cursor:pointer;background:var(--card);border:1px solid var(--border);color:var(--muted);transition:all .2s}
 .tab:first-child{border-radius:6px 0 0 6px}.tab:last-child{border-radius:0 6px 6px 0}
 .tab.active{background:var(--navy);color:#fff;border-color:var(--navy)}
-.chart-wrap{position:relative;width:100%;height:260px}
+.chart-wrap{position:relative;width:100%;height:175px}.chart-wrap canvas{position:absolute;top:0;left:0;width:100%!important;height:100%!important}
 
 /* Table */
 .tbl{width:100%;border-collapse:collapse;font-size:12px}
-.tbl th{background:var(--navy);color:#fff;padding:7px 8px;text-align:left;font-size:10px;letter-spacing:1px;text-transform:uppercase;font-weight:600;white-space:nowrap}
-.tbl td{padding:6px 8px;border-bottom:1px solid var(--border);font-family:'JetBrains Mono',monospace;font-size:11px;white-space:nowrap}
+.tbl th{background:var(--navy);color:#fff;padding:4px 6px;text-align:left;font-size:10px;letter-spacing:1px;text-transform:uppercase;font-weight:600;white-space:nowrap}
+.tbl td{padding:4px 6px;border-bottom:1px solid var(--border);font-family:'JetBrains Mono',monospace;font-size:11px;white-space:nowrap}
 .tbl tr:hover{background:rgba(255,255,255,.02)}
 .dir-buy{color:var(--green);font-weight:600}.dir-short{color:var(--neg);font-weight:600}
 .pace-ahead{color:var(--green)}.pace-behind{color:var(--neg)}.pace-on{color:var(--muted)}
@@ -68,22 +68,22 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;overf
 .progress-bar .fill{height:100%;background:var(--navy);border-radius:2px;transition:width .3s}
 
 /* Market cards */
-.mkt-card{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--card2);border-radius:6px;margin-bottom:6px}
+.mkt-card{display:flex;align-items:center;justify-content:space-between;padding:5px 10px;background:var(--card2);border-radius:6px;margin-bottom:4px}
 .mkt-card .sym{font-weight:700;font-size:13px;min-width:40px}
 .mkt-card .price{font-family:'JetBrains Mono',monospace;font-size:13px}
 .vix-hot{background:rgba(239,83,80,.15);border:1px solid rgba(239,83,80,.3)}
 .vix-warm{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.2)}
 
 /* Gauge */
-.gauge-wrap{display:flex;flex-direction:column;align-items:center;padding:12px}
-.gauge{position:relative;width:180px;height:110px}
+.gauge-wrap{display:flex;flex-direction:column;align-items:center;padding:6px}
+.gauge{position:relative;width:150px;height:90px}
 .gauge canvas{display:block}
-.gauge-val{position:absolute;bottom:6px;left:50%;transform:translateX(-50%);font-family:'JetBrains Mono',monospace;font-size:32px;font-weight:700}
+.gauge-val{position:absolute;bottom:6px;left:50%;transform:translateX(-50%);font-family:'JetBrains Mono',monospace;font-size:26px;font-weight:700}
 .gauge-label{font-size:13px;margin-top:6px;font-weight:600}
 .gauge-delta{font-size:11px;color:var(--muted);margin-top:2px}
 
 /* Right column stacking */
-.right-col .card{margin-bottom:16px}
+.right-col .card{margin-bottom:8px}
 .right-col .card:last-child{margin-bottom:0}
 
 /* Empty state */
@@ -139,21 +139,21 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;overf
 <div class="main-columns">
 
   <!-- LEFT COLUMN (65%) — Curves + Positions -->
-  <div class="left-col">
+  <div class="left-col" style="display:flex;flex-direction:column;height:100%;gap:8px;overflow:hidden;min-height:0;">
     <!-- Equity Curves -->
-    <div class="card" style="margin-bottom:16px">
+    <div class="card" style="margin-bottom:8px">
       <div class="tabs">
         <div class="tab active" onclick="switchTab(0)">Bedrock</div>
         <div class="tab" onclick="switchTab(1)">Event Alpha</div>
         <div class="tab" onclick="switchTab(2)">Digital Alpha</div>
       </div>
-      <div class="chart-wrap"><canvas id="equityChart" width="800" height="260"></canvas></div>
+      <div class="chart-wrap"><canvas id="equityChart" width="800" height="175"></canvas></div>
     </div>
 
     <!-- Open Positions -->
-    <div class="card">
+    <div class="card" style="flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;min-height:0">
       <h3 style="margin-bottom:10px">Open Positions <span id="posCount" class="mono" style="color:var(--red)"></span></h3>
-      <div style="overflow-x:auto;max-height:420px;overflow-y:auto">
+      <div style="overflow-x:auto;overflow-y:auto;flex:1;min-height:0">
         <table class="tbl" id="posTable">
           <thead><tr>
             <th>Ticker</th><th>Signal</th><th>Dir</th><th>Entry</th>
@@ -167,7 +167,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;overf
   </div>
 
   <!-- RIGHT COLUMN (35%) — Market + Sentiment + Scorecard -->
-  <div class="right-col">
+  <div class="right-col" style="height:100%;overflow-y:auto;">
     <!-- Market -->
     <div class="card">
       <h3>Market</h3>
@@ -181,7 +181,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;overf
     <div class="card">
       <h3>Crypto Fear &amp; Greed</h3>
       <div class="gauge-wrap">
-        <div class="gauge"><canvas id="gaugeCanvas" width="180" height="110"></canvas>
+        <div class="gauge"><canvas id="gaugeCanvas" width="150" height="90"></canvas>
           <div class="gauge-val" id="fngValue">--</div>
         </div>
         <div class="gauge-label" id="fngLabel">Loading...</div>
@@ -430,7 +430,7 @@ function updateMarket(d){
 function drawGauge(value){
   const canvas=document.getElementById('gaugeCanvas');
   const ctx=canvas.getContext('2d');
-  const w=180,h=110,cx=90,cy=100,r=75;
+  const w=150,h=90,cx=75,cy=82,r=62;
   ctx.clearRect(0,0,w,h);
   const zones=[
     {from:0,to:25,color:'#ef5350'},{from:25,to:45,color:'#ff7043'},
@@ -528,6 +528,22 @@ async function refreshAll(){
 
 // Initial load
 refreshAll();
+function fitToScreen(){
+  var tape=document.querySelector('.ticker-tape');
+  var cont=document.querySelector('.container');
+  var main=document.querySelector('.main-columns');
+  var port=document.querySelector('.row-3');
+  if(!tape||!cont||!main||!port)return;
+  var tapeBottom=tape.getBoundingClientRect().bottom;
+  cont.style.height=(window.innerHeight-tapeBottom)+'px';
+  cont.style.flex='none';
+  cont.style.overflow='hidden';
+  var portBottom=port.getBoundingClientRect().bottom;
+  main.style.height=(window.innerHeight-portBottom-8)+'px';
+  main.style.flex='none';
+}
+fitToScreen();
+window.addEventListener('resize',fitToScreen);
 </script>
 </body>
 </html>
