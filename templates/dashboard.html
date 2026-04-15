@@ -241,7 +241,14 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;overf
 let equityChart=null,curveData=null,activeTab=0;
 let prevPrices={},prevMarketPrices={},newsItems=[],liveConnected=false;
 let prevOpenTickers=new Set(),prevVixKill=false,prevPositionRets={},lastLiveQuotesData=null;
-const SLOW_INTERVAL=30000;
+function isMarketHours(){
+  const now=new Date();
+  const ct=new Date(now.toLocaleString('en-US',{timeZone:'America/Chicago'}));
+  const day=ct.getDay();
+  const mins=ct.getHours()*60+ct.getMinutes();
+  return day>=1&&day<=5&&mins>=510&&mins<900;
+}
+const SLOW_INTERVAL=isMarketHours()?5000:300000;
 let slowCountdown=SLOW_INTERVAL/1000,ringTotal=62.83;
 
 // ======= AUDIO =======

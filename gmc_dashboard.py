@@ -13,12 +13,26 @@ import time
 from datetime import date, datetime, timedelta
 from functools import lru_cache
 
+import pytz
 import requests
 import urllib3
 import yfinance as yf
 from flask import Flask, jsonify, render_template, send_from_directory
 
 import config
+
+_CT = pytz.timezone("US/Central")
+
+
+def _market_ttl(fast=5, slow=60):
+    """Return cache TTL based on market hours. Off-hours always 300s."""
+    now = datetime.now(_CT)
+    if now.weekday() < 5:
+        market_open = now.replace(hour=8, minute=30, second=0, microsecond=0)
+        market_close = now.replace(hour=15, minute=0, second=0, microsecond=0)
+        if market_open <= now <= market_close:
+            return fast
+    return 300
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -941,7 +955,7 @@ def api_live_quotes():
 
 @app.route("/api/news")
 def api_news():
-    return jsonify(cached("news", 60, _fetch_news))
+    return jsonify(cached("news", _market_ttl(fast=60), _fetch_news))
 
 @app.route("/")
 def index():
@@ -955,37 +969,37 @@ def static_files(filename):
 
 @app.route("/api/positions")
 def api_positions():
-    return jsonify(cached("positions", 60, _fetch_positions))
+    return jsonify(cached("positions", _market_ttl(fast=5), _fetch_positions))
 
 
 @app.route("/api/portfolio")
 def api_portfolio():
-    return jsonify(cached("portfolio", 60, _fetch_portfolio))
+    return jsonify(cached("portfolio", _market_ttl(fast=5), _fetch_portfolio))
 
 
 @app.route("/api/market")
 def api_market():
-    return jsonify(cached("market", 60, _fetch_market))
+    return jsonify(cached("market", _market_ttl(fast=5), _fetch_market))
 
 
 @app.route("/api/sentiment")
 def api_sentiment():
-    return jsonify(cached("sentiment", 300, _fetch_sentiment))
+    return jsonify(cached("sentiment", _market_ttl(fast=60), _fetch_sentiment))
 
 
 @app.route("/api/equity_curves")
 def api_equity_curves():
-    return jsonify(cached("equity_curves", 300, _fetch_equity_curves))
+    return jsonify(cached("equity_curves", _market_ttl(fast=60), _fetch_equity_curves))
 
 
 @app.route("/api/scorecard")
 def api_scorecard():
-    return jsonify(cached("scorecard", 300, _fetch_scorecard))
+    return jsonify(cached("scorecard", _market_ttl(fast=60), _fetch_scorecard))
 
 
 @app.route("/api/breadth_vol")
 def api_breadth_vol():
-    return jsonify(cached("breadth_vol", 300, _fetch_breadth_vol))
+    return jsonify(cached("breadth_vol", _market_ttl(fast=60), _fetch_breadth_vol))
 
 
 # ---------------------------------------------------------------------------
