@@ -97,7 +97,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;overf
   <div class="header-center"><span class="live-dot"></span>PORTFOLIO DASHBOARD</div>
   <div class="header-right">
     <button id="audioBtn" class="audio-btn off" onclick="toggleAudio()" title="Enable sound">&#128263;</button>
-    <button class="audio-btn" onclick="window.open('https://www.tradersaudio.com','_blank')" title="Traders Audio — live floor squawk">&#128225; SQUAWK</button>
+    <button class="audio-btn" onclick="window.open('https://www.youtube.com/results?search_query=trading+floor+ambient+sound+background','_blank')" title="Trading floor ambient sound — YouTube">&#128225; SQUAWK</button>
     <span id="liveStatus" style="font-size:10px;color:var(--muted)">Connecting...</span>
     <span class="clock" id="clock"></span>
     <span id="lastUpdate" style="font-size:10px"></span>
@@ -445,7 +445,7 @@ function renderMktRow(sym,q,crypto,containerId){
   const isIdx=INDEX_SYMS.has(sym);
   let ps,chgStr;
   if(isIdx){
-    ps=price!=null?price.toLocaleString('en-US',{maximumFractionDigits:0}):'--';
+    ps=price!=null?price.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'--';
     const ptsStr=pts!=null?`<span class="${pts>=0?'pos':'neg'} mono" style="font-size:10px">${pts>=0?'+':''}${pts.toFixed(2)}</span>`:'';
     const pctStr=chg!=null?chgHtml(chg):'';
     chgStr=ptsStr+(pctStr?' '+pctStr:'');
@@ -462,7 +462,7 @@ function renderMktRow(sym,q,crypto,containerId){
 function updateMarketFromQuotes(quotes){
   const idx=[{sym:'S&P 500',k:'^GSPC'},{sym:'Nasdaq',k:'^IXIC'},{sym:'Dow',k:'^DJI'},{sym:'Russell',k:'^RUT'}];
   const sec=[{sym:'XLE',k:'XLE'},{sym:'XLF',k:'XLF'},{sym:'XLK',k:'XLK'},{sym:'XLV',k:'XLV'}];
-  const rat=[{sym:'VIX',k:'VIX'},{sym:'10Y',k:'TNX'},{sym:'DXY',k:'UUP'}];
+  const rat=[{sym:'10Y',k:'TNX'},{sym:'DXY',k:'UUP'}];
   const cry=[{sym:'BTC',k:'BTCUSD'},{sym:'ETH',k:'ETHUSD'},{sym:'SOL',k:'SOLUSD'}];
   function renderGrid(list,id,crypto){
     let html='';

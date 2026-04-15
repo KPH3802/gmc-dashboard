@@ -476,11 +476,11 @@ def _fetch_portfolio():
         "day_change_pct": da_day_change_pct,
     }
 
-    # Combined GMC total
+    # Combined GMC total (all 3 funds)
     try:
-        combined_cost = config.BEDROCK_TOTAL_COST + (config.DIGITAL_ALPHA_BASELINE or 0)
-        combined_value = (bedrock_current or 0) + (cb_val or 0)
-        combined_pnl = (combined_value - combined_cost) + (total_pnl or 0)
+        combined_cost = config.BEDROCK_TOTAL_COST + (config.DIGITAL_ALPHA_BASELINE or 0) + (ea_acct or 0)
+        combined_pnl = ((bedrock_current or 0) + (cb_val or 0) - config.BEDROCK_TOTAL_COST - (config.DIGITAL_ALPHA_BASELINE or 0)) + (total_pnl or 0)
+        combined_value = (bedrock_current or 0) + (cb_val or 0) + (ea_acct or 0)
         combined_ret = round((combined_pnl / combined_cost) * 100, 2) if combined_cost else None
     except Exception:
         combined_pnl = None
