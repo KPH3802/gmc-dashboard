@@ -649,8 +649,10 @@ function updatePortfolio(d){
   }
   const ea=d.event_alpha;
   if(ea){
-    document.getElementById('eaRet').innerHTML=dollarHtml(ea.total_pnl);
-    document.getElementById('eaDay').innerHTML=ea.day_pnl!=null?`<span class="${ea.day_pnl>=0?'pos':'neg'}">Today: ${ea.day_pnl>=0?'+':''}$${Math.abs(ea.day_pnl).toFixed(2)}</span>`:'<span class="stale">--</span>';
+    document.getElementById('eaRet').innerHTML=pctHtml(ea.return_pct,false);
+    const pnlStr=ea.total_pnl!=null?`P&L: <span class="${ea.total_pnl>=0?'pos':'neg'}">${ea.total_pnl>=0?'+':''}$${Math.abs(ea.total_pnl).toFixed(2)}</span>`:'';
+    const dayStr=ea.day_pnl!=null?` &middot; Today: <span class="${ea.day_pnl>=0?'pos':'neg'}">${ea.day_pnl>=0?'+':''}$${Math.abs(ea.day_pnl).toFixed(2)}</span>`:'';
+    document.getElementById('eaDay').innerHTML=pnlStr+dayStr||'<span class="stale">--</span>';
     let eaSubStr=`${ea.open_positions||0} open &middot; ${ea.closed_trades||0} closed`;
     if(ea.ea_spy_return_pct!=null)eaSubStr+=` &middot; SPY since 1st trade ${pctHtml(ea.ea_spy_return_pct)}`;
     document.getElementById('eaSub').innerHTML=eaSubStr;

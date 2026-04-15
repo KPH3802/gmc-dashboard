@@ -481,23 +481,38 @@ def _fetch_portfolio():
     except Exception:
         pass
 
-    # Digital Alpha daily change (value-weighted across crypto positions)
+    # Digital Alpha daily change — FMP batch-quote for each crypto position
     da_day_change_pct = None
     try:
         if cb_pos and cb_val and cb_val > 0:
-            weighted_sum = 0.0
-            total_weight = 0.0
+            crypto_syms = []
+            crypto_vals = {}
             for pos in cb_pos:
                 currency = pos.get("currency", "")
                 usd_val = pos.get("usd_value", 0)
-                if not currency or usd_val <= 0.01 or currency == "USD":
+                if not currency or usd_val <= 0.01 or currency in ("USD", "USDC"):
                     continue
-                chg = yf.Ticker(f"{currency}-USD").fast_info.get("regularMarketChangePercent")
-                if chg is not None:
-                    weighted_sum += float(chg) * usd_val
-                    total_weight += usd_val
-            if total_weight > 0:
-                da_day_change_pct = round(weighted_sum / total_weight, 2)
+                sym = f"{currency}USD"
+                crypto_syms.append(sym)
+                crypto_vals[sym] = usd_val
+            if crypto_syms:
+                sym_str = ",".join(crypto_syms)
+                r = requests.get(
+                    f"https://financialmodelingprep.com/stable/batch-quote?symbols={sym_str}&apikey={config.FMP_API_KEY}",
+                    timeout=6)
+                if r.status_code == 200:
+                    data = r.json()
+                    if isinstance(data, list):
+                        weighted_sum = 0.0
+                        total_weight = 0.0
+                        for q in data:
+                            sym = q.get("symbol", "")
+                            chg = q.get("changePercentage")
+                            if sym in crypto_vals and chg is not None:
+                                weighted_sum += float(chg) * crypto_vals[sym]
+                                total_weight += crypto_vals[sym]
+                        if total_weight > 0:
+                            da_day_change_pct = round(weighted_sum / total_weight, 2)
     except Exception:
         da_day_change_pct = None
 
@@ -896,30 +911,22 @@ def _fetch_breadth_vol():
     except Exception as e:
         log.warning("Breadth/vol term calc failed: " + str(e))
 
-    # --- Put/Call Ratio: CBOE primary, alternate fallback ---
+    # --- Put/Call Ratio: FMP market-breadth ---
     try:
         r = requests.get(
-            "https://www.cboe.com/data/volatility-index-values/cboe-options-statistics/",
-            headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+            f"https://financialmodelingprep.com/stable/market-breadth?apikey={config.FMP_API_KEY}",
+            timeout=10)
         if r.status_code == 200:
-            import re
-            m = re.search(r'(?:Total|Equity)\s*Put/Call\s*Ratio[^0-9]*([\d]+\.[\d]+)', r.text, re.IGNORECASE)
-            if m:
-                out["put_call"] = round(float(m.group(1)), 2)
+            data = r.json()
+            pcr = None
+            if isinstance(data, dict):
+                pcr = data.get("put_call_ratio") or data.get("putCallRatio")
+            elif isinstance(data, list) and data:
+                pcr = data[0].get("put_call_ratio") or data[0].get("putCallRatio")
+            if pcr is not None:
+                out["put_call"] = round(float(pcr), 2)
     except Exception:
         pass
-    if out["put_call"] is None:
-        try:
-            r = requests.get(
-                "https://markets.cboe.com/us/options/market_statistics/daily/",
-                headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-            if r.status_code == 200:
-                import re
-                m = re.search(r'put.?call.*?([\d]+\.[\d]+)', r.text, re.IGNORECASE)
-                if m:
-                    out["put_call"] = round(float(m.group(1)), 2)
-        except Exception:
-            pass
 
     out["stale"] = out["spy_vol_today"] is None and out["vix"] is None
     return out
