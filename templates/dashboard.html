@@ -64,9 +64,9 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;overf
 .dir-short{color:var(--neg);font-weight:600}
 .mkt-grid{display:grid;grid-template-columns:1fr 1fr;gap:3px}
 .mkt-row{display:flex;align-items:center;justify-content:space-between;padding:3px 6px;background:var(--card2);border-radius:4px;gap:4px}
-.mkt-sym{font-weight:700;font-size:11px;min-width:38px}
+.mkt-sym{font-weight:700;font-size:11px;min-width:50px}
 .mkt-price{font-family:'JetBrains Mono',monospace;font-size:11px;flex:1;text-align:right;padding:0 4px;transition:background .3s}
-.mkt-chg{font-family:'JetBrains Mono',monospace;font-size:10px;min-width:52px;text-align:right}
+.mkt-chg{font-family:'JetBrains Mono',monospace;font-size:10px;min-width:80px;text-align:right}
 .mkt-sec-label{font-size:8px;color:var(--muted);margin:4px 0 2px;text-transform:uppercase;letter-spacing:1px;font-weight:600}
 .mkt-sec-label:first-child{margin-top:0}
 .vix-hot{background:rgba(239,83,80,.15);border:1px solid rgba(239,83,80,.3)}
@@ -97,6 +97,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;overf
   <div class="header-center"><span class="live-dot"></span>PORTFOLIO DASHBOARD</div>
   <div class="header-right">
     <button id="audioBtn" class="audio-btn off" onclick="toggleAudio()" title="Enable sound">&#128263;</button>
+    <button class="audio-btn" onclick="window.open('https://www.tradersaudio.com','_blank')" title="Traders Audio — live floor squawk">&#128225; SQUAWK</button>
     <span id="liveStatus" style="font-size:10px;color:var(--muted)">Connecting...</span>
     <span class="clock" id="clock"></span>
     <span id="lastUpdate" style="font-size:10px"></span>
@@ -148,7 +149,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;overf
           <thead><tr>
             <th>Ticker</th><th>Sig</th><th>Dir</th>
             <th>Entry</th><th>Entry$</th><th>Now$</th>
-            <th>Ret</th><th>Day</th><th>Left</th>
+            <th>RET%</th><th>P&L$</th><th>Day</th><th>Left</th>
           </tr></thead>
           <tbody id="posBody"></tbody>
         </table>
@@ -185,7 +186,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;overf
 <div class="bottom-section">
   <div class="card" style="overflow-y:auto">
     <h3>Market</h3>
-    <div class="mkt-sec-label">Index ETFs</div>
+    <div class="mkt-sec-label">Indices</div>
     <div class="mkt-grid" id="mktIndex"></div>
     <div class="mkt-sec-label">Sectors</div>
     <div class="mkt-grid" id="mktSectors"></div>
@@ -421,25 +422,45 @@ function applyLiveQuotes(quotes){
       priceEl.textContent='$'+newPrice.toFixed(2);
       const entry=parseFloat(row.getAttribute('data-entry'));
       const dir=row.getAttribute('data-dir');
+      const posSize=parseFloat(row.getAttribute('data-size'))||0;
       if(entry&&dir&&retEl){
         const ret=dir==='SHORT'?((entry-newPrice)/entry)*100:((newPrice-entry)/entry)*100;
         retEl.innerHTML=pctHtml(parseFloat(ret.toFixed(2)));
+        const pnlEl=row.querySelector('.live-pnl');
+        if(pnlEl&&posSize>0){
+          const pnl=(ret/100)*posSize;
+          pnlEl.innerHTML=`<span class="${pnl>=0?'pos':'neg'}">${pnl>=0?'+':''}$${Math.abs(pnl).toFixed(2)}</span>`;
+        }
       }
     },i*200);
   });
 }
 
+const INDEX_SYMS=new Set(['S&P 500','Nasdaq','Dow','Russell']);
 function renderMktRow(sym,q,crypto,containerId){
   if(!q)return '';
-  const price=q.price,chg=q.change_pct;
+  const price=q.price,chg=q.change_pct,pts=q.change;
   let extra='';
   if(sym==='VIX'&&price!=null){if(price>=30)extra='vix-hot';else if(price>=25)extra='vix-warn';}
-  const ps=crypto?(price!=null?'$'+price.toLocaleString('en-US',{maximumFractionDigits:0}):'--'):(price!=null?price.toFixed(2):'--');
-  return `<div class="mkt-row ${extra}" data-sym="${sym}"><span class="mkt-sym">${sym}</span><span class="mkt-price">${ps}</span><span class="mkt-chg">${chg!=null?chgHtml(chg):''}</span></div>`;
+  const isIdx=INDEX_SYMS.has(sym);
+  let ps,chgStr;
+  if(isIdx){
+    ps=price!=null?price.toLocaleString('en-US',{maximumFractionDigits:0}):'--';
+    const ptsStr=pts!=null?`<span class="${pts>=0?'pos':'neg'} mono" style="font-size:10px">${pts>=0?'+':''}${pts.toFixed(2)}</span>`:'';
+    const pctStr=chg!=null?chgHtml(chg):'';
+    chgStr=ptsStr+(pctStr?' '+pctStr:'');
+  }else if(crypto){
+    ps=price!=null?'$'+price.toLocaleString('en-US',{maximumFractionDigits:0}):'--';
+    chgStr=chg!=null?chgHtml(chg):'';
+  }else{
+    ps=price!=null?price.toFixed(2):'--';
+    chgStr=chg!=null?chgHtml(chg):'';
+  }
+  return `<div class="mkt-row ${extra}" data-sym="${sym}"><span class="mkt-sym">${sym}</span><span class="mkt-price">${ps}</span><span class="mkt-chg">${chgStr}</span></div>`;
 }
 
 function updateMarketFromQuotes(quotes){
-  const idx=[{sym:'SPY',k:'SPY'},{sym:'QQQ',k:'QQQ'},{sym:'DIA',k:'DIA'},{sym:'IWM',k:'IWM'}];
+  const idx=[{sym:'S&P 500',k:'^GSPC'},{sym:'Nasdaq',k:'^IXIC'},{sym:'Dow',k:'^DJI'},{sym:'Russell',k:'^RUT'}];
   const sec=[{sym:'XLE',k:'XLE'},{sym:'XLF',k:'XLF'},{sym:'XLK',k:'XLK'},{sym:'XLV',k:'XLV'}];
   const rat=[{sym:'VIX',k:'VIX'},{sym:'10Y',k:'TNX'},{sym:'DXY',k:'UUP'}];
   const cry=[{sym:'BTC',k:'BTCUSD'},{sym:'ETH',k:'ETHUSD'},{sym:'SOL',k:'SOLUSD'}];
@@ -504,7 +525,7 @@ function updatePortfolio(d){
   if(b){
     document.getElementById('bedrockRet').innerHTML=pctHtml(b.return_pct,false);
     document.getElementById('bedrockDay').innerHTML=dayChangeHtml(b.day_change_dollar,b.day_change_pct);
-    document.getElementById('bedrockSub').innerHTML=`Cost ${dollarHtml(b.cost_basis)} &middot; Val ${dollarHtml(b.current_value)} &middot; SPY ${pctHtml(b.spy_return_pct)}`;
+    document.getElementById('bedrockSub').innerHTML=`Cost ${dollarHtml(b.cost_basis)} &middot; Val ${dollarHtml(b.current_value)} &middot; SPY since entry ${pctHtml(b.spy_return_pct)}`;
   }
   const ea=d.event_alpha;
   if(ea){
@@ -538,7 +559,8 @@ function updatePositions(d){
     for(const tk of prevOpenTickers){if(!newTickers.has(tk))playExitTone();}
   }
   prevOpenTickers=newTickers;
-  if(!d.positions.length){tbody.innerHTML='<tr><td colspan="9" style="padding:12px;color:var(--muted);text-align:center;font-style:italic">No open positions</td></tr>';return;}
+  if(!d.positions.length){tbody.innerHTML='<tr><td colspan="10" style="padding:12px;color:var(--muted);text-align:center;font-style:italic">No open positions</td></tr>';return;}
+  const _months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   let html='';
   for(const p of d.positions){
     const dirCls=p.direction==='SHORT'?'dir-short':'dir-buy';
@@ -547,14 +569,19 @@ function updatePositions(d){
     const leftStr=p.days_remaining!=null?`${p.days_remaining}d`:'--';
     const stale=p.stale?'<span class="stale"> &#9888;</span>':'';
     const curPrice=p.current_price?'$'+p.current_price.toFixed(2):'--';
-    html+=`<tr data-ticker="${p.ticker}" data-entry="${p.entry_price||0}" data-dir="${p.direction||'BUY'}">
+    let entryStr=p.entry_date||'--';
+    if(p.entry_date&&p.entry_date.length===10){const pts=p.entry_date.split('-');entryStr=_months[parseInt(pts[1])-1]+'-'+pts[2];}
+    const pnlDollar=(p.return_pct!=null&&p.position_size)?(p.return_pct/100)*p.position_size:null;
+    const pnlStr=pnlDollar!=null?`<span class="${pnlDollar>=0?'pos':'neg'}">${pnlDollar>=0?'+':''}$${Math.abs(pnlDollar).toFixed(2)}</span>`:'--';
+    html+=`<tr data-ticker="${p.ticker}" data-entry="${p.entry_price||0}" data-dir="${p.direction||'BUY'}" data-size="${p.position_size||0}">
       <td style="font-weight:700;color:#fff">${p.ticker}${stale}</td>
       <td style="font-family:Inter;font-size:9px;color:var(--muted)">${p.source||''}</td>
       <td><span class="${dirCls}">${dirLbl}</span></td>
-      <td>${p.entry_date||'--'}</td>
+      <td>${entryStr}</td>
       <td>${p.entry_price?'$'+p.entry_price.toFixed(2):'--'}</td>
       <td class="live-price">${curPrice}</td>
       <td class="live-return">${pctHtml(p.return_pct)}</td>
+      <td class="live-pnl">${pnlStr}</td>
       <td>${dayStr}</td>
       <td>${leftStr}</td>
     </tr>`;

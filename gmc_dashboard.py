@@ -699,12 +699,12 @@ def _fetch_scorecard():
 def _fetch_live_quotes():
     open_pos = read_positions("OPEN")
     pos_tickers = list(set(p["ticker"] for p in open_pos))
-    market_syms = ["SPY", "QQQ", "DIA", "IWM", "XLE", "XLF", "XLK", "XLV", "UUP"]
+    market_syms = ["^GSPC", "^IXIC", "^DJI", "^RUT", "XLE", "XLF", "XLK", "XLV", "UUP"]
     all_equity_syms = list(set(market_syms + pos_tickers))
     quotes = {}
     # Primary: FMP /stable/batch-quote (correct endpoint post-Aug 2025)
     try:
-        sym_str = ",".join(all_equity_syms)
+        sym_str = ",".join(all_equity_syms).replace("^", "%5E")
         r = requests.get(
             "https://financialmodelingprep.com/stable/batch-quote?symbols=" + sym_str + "&apikey=" + config.FMP_API_KEY,
             timeout=6
@@ -769,28 +769,72 @@ def _fetch_news():
     return []
 
 
+def _calc_realized_vol(closes):
+    """Calculate 20d and 60d annualized realized vol from daily close prices.
+    Returns (vol_20d, vol_60d, ratio) or (None, None, None)."""
+    import math
+    if len(closes) < 21:
+        return None, None, None
+    log_rets = [math.log(closes[i] / closes[i - 1]) for i in range(1, len(closes))]
+
+    def _std(arr):
+        n = len(arr)
+        if n < 2:
+            return 0.0
+        mean = sum(arr) / n
+        return (sum((x - mean) ** 2 for x in arr) / (n - 1)) ** 0.5
+
+    vol_20 = _std(log_rets[-20:]) * (252 ** 0.5) * 100
+    rets_60 = log_rets[-60:] if len(log_rets) >= 60 else log_rets
+    vol_60 = _std(rets_60) * (252 ** 0.5) * 100
+    ratio = round(vol_20 / vol_60, 2) if vol_60 > 0 else None
+    return round(vol_20, 2), round(vol_60, 2), ratio
+
+
 def _fetch_breadth_vol():
-    """Breadth & volatility snapshot: SPY realized vol vs 30d avg, VIX term structure, put/call ratio."""
+    """Breadth & volatility snapshot: SPY realized vol vs 60d avg, VIX term structure, put/call ratio."""
     out = {"spy_vol_today": None, "spy_vol_30d_avg": None, "spy_vol_ratio": None,
            "vix": None, "vix3m": None, "term_ratio": None, "term_state": None,
            "put_call": None, "stale": True}
+
+    # --- SPY Realized Vol: FMP primary, yfinance fallback ---
     try:
-        import pandas
-        df = yf.download("SPY", period="90d", interval="1d", progress=False)
-        if df is not None and not df.empty:
-            if isinstance(df.columns, pandas.MultiIndex):
-                df.columns = [c[0] for c in df.columns]
-            closes = df["Close"].dropna()
-            if len(closes) >= 31:
-                rets = closes.pct_change().dropna()
-                # Annualized realized vol: std * sqrt(252)
-                vol_today = float(rets.tail(20).std() * (252 ** 0.5) * 100)
-                vol_avg = float(rets.tail(60).std() * (252 ** 0.5) * 100) if len(rets) >= 60 else vol_today
-                out["spy_vol_today"] = round(vol_today, 2)
-                out["spy_vol_30d_avg"] = round(vol_avg, 2)
-                out["spy_vol_ratio"] = round(vol_today / vol_avg, 2) if vol_avg else None
+        from_date = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+        url = (f"https://financialmodelingprep.com/stable/historical-price-eod/full"
+               f"?symbol=SPY&from={from_date}&apikey={config.FMP_API_KEY}")
+        r = requests.get(url, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, dict):
+                data = data.get("historical", [])
+            if isinstance(data, list) and data:
+                data.sort(key=lambda x: x.get("date", ""))
+                closes = [float(d["close"]) for d in data if d.get("close")]
+                v20, v60, ratio = _calc_realized_vol(closes)
+                if v20 is not None:
+                    out["spy_vol_today"] = v20
+                    out["spy_vol_30d_avg"] = v60
+                    out["spy_vol_ratio"] = ratio
     except Exception as e:
-        log.warning("Breadth/vol SPY calc failed: " + str(e))
+        log.warning(f"SPY vol FMP failed: {e}")
+
+    if out["spy_vol_today"] is None:
+        try:
+            import pandas
+            df = yf.download("SPY", period="90d", interval="1d", progress=False)
+            if df is not None and not df.empty:
+                if isinstance(df.columns, pandas.MultiIndex):
+                    df.columns = [c[0] for c in df.columns]
+                closes = [float(c) for c in df["Close"].dropna().values]
+                v20, v60, ratio = _calc_realized_vol(closes)
+                if v20 is not None:
+                    out["spy_vol_today"] = v20
+                    out["spy_vol_30d_avg"] = v60
+                    out["spy_vol_ratio"] = ratio
+        except Exception as e:
+            log.warning(f"SPY vol yfinance fallback failed: {e}")
+
+    # --- VIX Term Structure (keep existing approach) ---
     try:
         vol = batch_fetch_prices(["^VIX", "^VIX3M"])
         vix = vol.get("^VIX")
@@ -800,21 +844,35 @@ def _fetch_breadth_vol():
         if vix and vix3m:
             ratio = vix / vix3m
             out["term_ratio"] = round(ratio, 3)
-            # <1 = contango (calm); >1 = backwardation (stress)
             out["term_state"] = "CONTANGO" if ratio < 1 else "BACKWARDATION"
     except Exception as e:
         log.warning("Breadth/vol term calc failed: " + str(e))
+
+    # --- Put/Call Ratio: CBOE primary, alternate fallback ---
     try:
-        # CBOE equity put/call ratio via yfinance proxy — use $CPC if available, else skip
-        import pandas
-        df = yf.download("^CPC", period="5d", interval="1d", progress=False)
-        if df is not None and not df.empty:
-            if isinstance(df.columns, pandas.MultiIndex):
-                df.columns = [c[0] for c in df.columns]
-            last = float(df["Close"].dropna().iloc[-1])
-            out["put_call"] = round(last, 2)
+        r = requests.get(
+            "https://www.cboe.com/data/volatility-index-values/cboe-options-statistics/",
+            headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        if r.status_code == 200:
+            import re
+            m = re.search(r'(?:Total|Equity)\s*Put/Call\s*Ratio[^0-9]*([\d]+\.[\d]+)', r.text, re.IGNORECASE)
+            if m:
+                out["put_call"] = round(float(m.group(1)), 2)
     except Exception:
         pass
+    if out["put_call"] is None:
+        try:
+            r = requests.get(
+                "https://markets.cboe.com/us/options/market_statistics/daily/",
+                headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+            if r.status_code == 200:
+                import re
+                m = re.search(r'put.?call.*?([\d]+\.[\d]+)', r.text, re.IGNORECASE)
+                if m:
+                    out["put_call"] = round(float(m.group(1)), 2)
+        except Exception:
+            pass
+
     out["stale"] = out["spy_vol_today"] is None and out["vix"] is None
     return out
 
