@@ -423,12 +423,44 @@ def _fetch_portfolio():
     except Exception:
         pass
 
+    # EA benchmark: SPY return since first trade date
+    ea_benchmark_date = None
+    ea_spy_ret = None
+    try:
+        db_path = config.POSITIONS_DB
+        if os.path.exists(db_path):
+            conn = sqlite3.connect(db_path)
+            row = conn.execute(
+                "SELECT MIN(entry_date) FROM open_positions WHERE source IN "
+                "('8K_1.01','CEL_BEAR','PEAD_BULL','PEAD_BEAR','SI_SQUEEZE',"
+                "'COT_BULL','COT_BEAR','THIRTEENF_BULL')"
+            ).fetchone()
+            if row and row[0]:
+                ea_benchmark_date = row[0]
+            conn.close()
+    except Exception:
+        pass
+    if ea_benchmark_date:
+        try:
+            import pandas
+            df = yf.download("SPY", start=ea_benchmark_date,
+                             end=(today + timedelta(days=1)).isoformat(), progress=False)
+            if df is not None and not df.empty:
+                if isinstance(df.columns, pandas.MultiIndex):
+                    df.columns = [c[0] for c in df.columns]
+                spy_s = float(df["Close"].iloc[0])
+                spy_e = float(df["Close"].iloc[-1])
+                ea_spy_ret = round(((spy_e - spy_s) / spy_s) * 100, 2)
+        except Exception:
+            pass
+
     event_alpha = {
         "name": "Event Alpha", "account_value": ea_acct,
         "deployed_capital": round(deployed, 2), "open_positions": len(open_pos),
         "closed_trades": len(closed), "total_pnl": round(total_pnl, 2),
         "return_pct": ea_ret, "stale": ib_val is None, "account_source": ea_source,
         "day_pnl": ea_day_pnl,
+        "ea_benchmark_date": ea_benchmark_date, "ea_spy_return_pct": ea_spy_ret,
     }
 
     # --- Digital Alpha ---
@@ -469,11 +501,27 @@ def _fetch_portfolio():
     except Exception:
         da_day_change_pct = None
 
+    # BTC benchmark from DA capital allocation date (Apr 7 2026)
+    btc_benchmark_ret = None
+    try:
+        import pandas
+        df = yf.download("BTC-USD", start="2026-04-07",
+                         end=(today + timedelta(days=1)).isoformat(), progress=False)
+        if df is not None and not df.empty:
+            if isinstance(df.columns, pandas.MultiIndex):
+                df.columns = [c[0] for c in df.columns]
+            btc_bench_s = float(df["Close"].iloc[0])
+            btc_bench_e = float(df["Close"].iloc[-1])
+            btc_benchmark_ret = round(((btc_bench_e - btc_bench_s) / btc_bench_s) * 100, 2)
+    except Exception:
+        pass
+
     digital_alpha = {
         "name": "Digital Alpha", "current_value": cb_val,
         "baseline": da_baseline, "return_pct": da_ret,
         "btc_hold_pct": btc_ret, "positions": cb_pos, "stale": cb_val is None,
         "day_change_pct": da_day_change_pct,
+        "btc_benchmark_return": btc_benchmark_ret,
     }
 
     # Combined GMC total (all 3 funds)

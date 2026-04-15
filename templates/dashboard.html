@@ -240,7 +240,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;overf
 // ======= GLOBALS =======
 let equityChart=null,curveData=null,activeTab=0;
 let prevPrices={},prevMarketPrices={},newsItems=[],liveConnected=false;
-let prevOpenTickers=new Set(),prevVixKill=false;
+let prevOpenTickers=new Set(),prevVixKill=false,prevPositionRets={},lastLiveQuotesData=null;
 const SLOW_INTERVAL=30000;
 let slowCountdown=SLOW_INTERVAL/1000,ringTotal=62.83;
 
@@ -310,20 +310,139 @@ function playAlarm(){
   burst.forEach(d=>setTimeout(()=>playBeep(2800,0.06,0.18,'square'),d));
 }
 
-// ======= NYSE OPEN/CLOSE BELLS =======
+// ======= NYSE OPEN/CLOSE BELLS — realistic exchange bell synthesis =======
+function _playBellStrike(decay){
+  if(!audioEnabled||!audioCtx)return;
+  try{
+    const t0=audioCtx.currentTime;
+    const master=audioCtx.createGain();
+    master.gain.setValueAtTime(0.7,t0);
+    master.gain.exponentialRampToValueAtTime(0.0001,t0+decay);
+    master.connect(audioCtx.destination);
+    // Layer harmonically related oscillators with slight detune for richness
+    const partials=[
+      {freq:880,type:'sine',gain:0.5},
+      {freq:1760,type:'sine',gain:0.3},
+      {freq:2640,type:'sine',gain:0.15},
+      {freq:3080,type:'sine',gain:0.1},
+      {freq:886,type:'sine',gain:0.2},   // slight detune for shimmer
+      {freq:1752,type:'sine',gain:0.12},
+    ];
+    for(const p of partials){
+      const osc=audioCtx.createOscillator();
+      osc.type=p.type;
+      osc.frequency.setValueAtTime(p.freq,t0);
+      const g=audioCtx.createGain();
+      g.gain.setValueAtTime(p.gain,t0);
+      g.gain.exponentialRampToValueAtTime(0.0001,t0+decay);
+      osc.connect(g);g.connect(master);
+      osc.start(t0);osc.stop(t0+decay+0.05);
+    }
+  }catch(e){}
+}
 function playOpenBell(){
   if(!audioEnabled||!audioCtx)return;
   const key='gmc_open_bell_'+new Date().toISOString().slice(0,10);
   if(localStorage.getItem(key))return;
   localStorage.setItem(key,'1');
-  playSequence([800,1200,1600],0.2,0.15,250,'square');
+  // NYSE triple bell — 3 strikes with 1.2s gaps
+  _playBellStrike(2.8);
+  setTimeout(()=>_playBellStrike(2.8),1200);
+  setTimeout(()=>_playBellStrike(2.8),2400);
 }
 function playCloseBell(){
   if(!audioEnabled||!audioCtx)return;
   const key='gmc_close_bell_'+new Date().toISOString().slice(0,10);
   if(localStorage.getItem(key))return;
   localStorage.setItem(key,'1');
-  playSequence([1600,1200,800],0.2,0.15,250,'square');
+  // Single definitive bell with long decay
+  _playBellStrike(4.0);
+}
+
+// ======= MARKET MOOD SOUNDS =======
+let lastMoodSoundTime=0;
+const MOOD_COOLDOWN=300000; // 5 minutes in ms
+
+function playMoodUp(){
+  if(!audioEnabled||!audioCtx)return;
+  // C-E-G major arpeggio — cheerful rising
+  const freqs=[523,659,784];
+  freqs.forEach((f,i)=>{
+    setTimeout(()=>{
+      try{
+        const t0=audioCtx.currentTime;
+        const osc=audioCtx.createOscillator();osc.type='sine';
+        osc.frequency.setValueAtTime(f,t0);
+        const g=audioCtx.createGain();
+        g.gain.setValueAtTime(0,t0);
+        g.gain.linearRampToValueAtTime(0.15,t0+0.005);
+        g.gain.exponentialRampToValueAtTime(0.0001,t0+0.15);
+        osc.connect(g);g.connect(audioCtx.destination);
+        osc.start(t0);osc.stop(t0+0.16);
+      }catch(e){}
+    },i*150);
+  });
+}
+
+function playMoodDown(){
+  if(!audioEnabled||!audioCtx)return;
+  // Descending ominous — sawtooth for heaviness
+  const freqs=[294,220,185];
+  freqs.forEach((f,i)=>{
+    setTimeout(()=>{
+      try{
+        const t0=audioCtx.currentTime;
+        const osc=audioCtx.createOscillator();osc.type='sawtooth';
+        osc.frequency.setValueAtTime(f,t0);
+        const lp=audioCtx.createBiquadFilter();lp.type='lowpass';lp.frequency.value=800;
+        const g=audioCtx.createGain();
+        g.gain.setValueAtTime(0,t0);
+        g.gain.linearRampToValueAtTime(0.25,t0+0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001,t0+0.3);
+        osc.connect(lp);lp.connect(g);g.connect(audioCtx.destination);
+        osc.start(t0);osc.stop(t0+0.31);
+      }catch(e){}
+    },i*300);
+  });
+}
+
+function playLargeMoveAlert(){
+  if(!audioEnabled||!audioCtx)return;
+  playBeep(1200,0.08,0.2,'square');
+  setTimeout(()=>playBeep(800,0.08,0.2,'square'),120);
+}
+
+function evaluateMarketMood(positionsData,quotesData){
+  if(!audioEnabled||!audioCtx)return;
+  if(!positionsData||!positionsData.positions||!positionsData.positions.length)return;
+  const positions=positionsData.positions;
+  const now=Date.now();
+  // Large single move alert — fires immediately, no throttle
+  for(const p of positions){
+    if(p.return_pct!=null&&p._prev_ret!=null){
+      const delta=Math.abs(p.return_pct-p._prev_ret);
+      if(delta>=3.0)playLargeMoveAlert();
+    }
+  }
+  // Mood — throttled to 5 min
+  if(now-lastMoodSoundTime<MOOD_COOLDOWN)return;
+  let winning=0,total=0;
+  for(const p of positions){
+    if(p.return_pct!=null){total++;if(p.return_pct>0)winning++;}
+  }
+  if(total===0)return;
+  const winPct=winning/total;
+  // S&P day change from live quotes
+  let spChg=null;
+  if(quotesData&&quotesData.quotes){
+    const sp=quotesData.quotes['^GSPC'];
+    if(sp&&sp.change_pct!=null)spChg=sp.change_pct;
+  }
+  if(winPct>0.7&&spChg!=null&&spChg>0.5){
+    playMoodUp();lastMoodSoundTime=now;
+  }else if(winPct<0.3||(spChg!=null&&spChg<-0.5)){
+    playMoodDown();lastMoodSoundTime=now;
+  }
 }
 
 // ======= CLOCK =======
@@ -377,6 +496,7 @@ async function fetchLiveQuotes(){
     const r=await fetch('/api/live_quotes');
     const d=await r.json();
     if(d&&d.quotes){
+      lastLiveQuotesData=d;
       const st=document.getElementById('liveStatus');
       st.textContent=d.source==='ibkr'?'IBKR LIVE':'LIVE';
       st.style.color='var(--green)';
@@ -531,13 +651,17 @@ function updatePortfolio(d){
   if(ea){
     document.getElementById('eaRet').innerHTML=dollarHtml(ea.total_pnl);
     document.getElementById('eaDay').innerHTML=ea.day_pnl!=null?`<span class="${ea.day_pnl>=0?'pos':'neg'}">Today: ${ea.day_pnl>=0?'+':''}$${Math.abs(ea.day_pnl).toFixed(2)}</span>`:'<span class="stale">--</span>';
-    document.getElementById('eaSub').innerHTML=`${ea.open_positions||0} open &middot; ${ea.closed_trades||0} closed &middot; Win ${ea.win_rate!=null?ea.win_rate.toFixed(0)+'%':'--'}`;
+    let eaSubStr=`${ea.open_positions||0} open &middot; ${ea.closed_trades||0} closed`;
+    if(ea.ea_spy_return_pct!=null)eaSubStr+=` &middot; SPY since 1st trade ${pctHtml(ea.ea_spy_return_pct)}`;
+    document.getElementById('eaSub').innerHTML=eaSubStr;
   }
   const da=d.digital_alpha;
   if(da){
     document.getElementById('daRet').innerHTML=pctHtml(da.return_pct,false);
     document.getElementById('daDay').innerHTML=da.day_change_pct!=null?`<span class="${da.day_change_pct>=0?'pos':'neg'}">Today: ${da.day_change_pct>=0?'+':''}${da.day_change_pct.toFixed(2)}%</span>`:'<span class="stale">--</span>';
-    document.getElementById('daSub').innerHTML=`Cost ${dollarHtml(da.cost_basis)} &middot; Val ${dollarHtml(da.current_value)}`;
+    let daSubStr=`Val ${dollarHtml(da.current_value)}`;
+    if(da.btc_benchmark_return!=null)daSubStr+=` &middot; BTC since Apr-7 ${pctHtml(da.btc_benchmark_return)}`;
+    document.getElementById('daSub').innerHTML=daSubStr;
   }
   const gmc=d.combined;
   if(gmc){
@@ -801,6 +925,14 @@ async function slowRefresh(){
   requestAnimationFrame(()=>renderChart());
   updateScorecard(sc);
   updateBreadthVol(bv);
+  // Market mood evaluation — attach prev returns for large-move detection
+  if(pos&&pos.positions){
+    for(const p of pos.positions){
+      p._prev_ret=prevPositionRets[p.ticker]!=null?prevPositionRets[p.ticker]:null;
+      prevPositionRets[p.ticker]=p.return_pct;
+    }
+    evaluateMarketMood(pos,lastLiveQuotesData);
+  }
   document.getElementById('lastUpdate').textContent='Updated '+new Date().toLocaleTimeString('en-US',{hour12:false});
   slowCountdown=SLOW_INTERVAL/1000;
 }
