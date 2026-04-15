@@ -338,6 +338,25 @@ def _fetch_portfolio():
         })
     bedrock_ret = round(((bedrock_current - config.BEDROCK_TOTAL_COST) / config.BEDROCK_TOTAL_COST) * 100, 2) if bedrock_current else None
 
+    # Bedrock daily change (prev close → current)
+    bedrock_day_change_pct = None
+    bedrock_day_change_dollar = None
+    try:
+        bedrock_prev_value = 0.0
+        all_ok = True
+        for h in config.BEDROCK_HOLDINGS:
+            pc = yf.Ticker(h["ticker"]).fast_info.get("previousClose")
+            if pc is None:
+                all_ok = False
+                break
+            bedrock_prev_value += h["shares"] * pc
+        if all_ok and bedrock_prev_value > 0 and bedrock_current > 0:
+            bedrock_day_change_dollar = round(bedrock_current - bedrock_prev_value, 2)
+            bedrock_day_change_pct = round((bedrock_day_change_dollar / bedrock_prev_value) * 100, 2)
+    except Exception:
+        bedrock_day_change_pct = None
+        bedrock_day_change_dollar = None
+
     # SPY benchmark from bedrock entry
     spy_ret = None
     try:
@@ -359,6 +378,7 @@ def _fetch_portfolio():
         "current_value": round(bedrock_current, 2) if bedrock_current else None,
         "return_pct": bedrock_ret, "days_held": (today - entry_dt).days,
         "spy_return_pct": spy_ret, "holdings": bedrock_holdings, "stale": bedrock_current == 0,
+        "day_change_pct": bedrock_day_change_pct, "day_change_dollar": bedrock_day_change_dollar,
     }
 
     # --- Event Alpha ---
@@ -367,14 +387,48 @@ def _fetch_portfolio():
     closed = read_positions("CLOSED")
     total_pnl = sum((p.get("return_pct") or 0) / 100 * (p.get("position_size") or 0) for p in closed)
     ib_val = get_ib_account_value(config.IB_ACCOUNT_PAPER)
-    ea_acct = ib_val or config.EVENT_ALPHA_FALLBACK
+    cache_path = os.path.expanduser("~/gmc_data/last_ea_value.txt")
+    if ib_val is not None:
+        try:
+            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+            with open(cache_path, "w") as f:
+                f.write(str(ib_val))
+        except Exception:
+            pass
+        ea_acct = ib_val
+        ea_source = "live"
+    else:
+        cached_val = None
+        try:
+            if os.path.exists(cache_path):
+                with open(cache_path, "r") as f:
+                    cached_val = float(f.read().strip())
+        except Exception:
+            cached_val = None
+        ea_acct = cached_val if cached_val else config.EVENT_ALPHA_FALLBACK
+        ea_source = "cache" if cached_val else "fallback"
     ea_ret = round((total_pnl / ea_acct) * 100, 2) if ea_acct else None
+
+    # Event Alpha daily P&L from IB Gateway
+    ea_day_pnl = None
+    try:
+        r = requests.get(
+            f"{config.IB_GATEWAY_URL}/portfolio/{config.IB_ACCOUNT_PAPER}/summary",
+            verify=False, timeout=5)
+        if r.status_code == 200:
+            for item in r.json():
+                if item.get("id") == "dailypnl":
+                    ea_day_pnl = round(float(item.get("amount", 0)), 2)
+                    break
+    except Exception:
+        pass
 
     event_alpha = {
         "name": "Event Alpha", "account_value": ea_acct,
         "deployed_capital": round(deployed, 2), "open_positions": len(open_pos),
         "closed_trades": len(closed), "total_pnl": round(total_pnl, 2),
-        "return_pct": ea_ret, "stale": ib_val is None,
+        "return_pct": ea_ret, "stale": ib_val is None, "account_source": ea_source,
+        "day_pnl": ea_day_pnl,
     }
 
     # --- Digital Alpha ---
@@ -395,13 +449,48 @@ def _fetch_portfolio():
     except Exception:
         pass
 
+    # Digital Alpha daily change (value-weighted across crypto positions)
+    da_day_change_pct = None
+    try:
+        if cb_pos and cb_val and cb_val > 0:
+            weighted_sum = 0.0
+            total_weight = 0.0
+            for pos in cb_pos:
+                currency = pos.get("currency", "")
+                usd_val = pos.get("usd_value", 0)
+                if not currency or usd_val <= 0.01 or currency == "USD":
+                    continue
+                chg = yf.Ticker(f"{currency}-USD").fast_info.get("regularMarketChangePercent")
+                if chg is not None:
+                    weighted_sum += float(chg) * usd_val
+                    total_weight += usd_val
+            if total_weight > 0:
+                da_day_change_pct = round(weighted_sum / total_weight, 2)
+    except Exception:
+        da_day_change_pct = None
+
     digital_alpha = {
         "name": "Digital Alpha", "current_value": cb_val,
         "baseline": da_baseline, "return_pct": da_ret,
         "btc_hold_pct": btc_ret, "positions": cb_pos, "stale": cb_val is None,
+        "day_change_pct": da_day_change_pct,
     }
 
-    return {"bedrock": bedrock, "event_alpha": event_alpha, "digital_alpha": digital_alpha, "stale": False}
+    # Combined GMC total
+    try:
+        combined_cost = config.BEDROCK_TOTAL_COST + (config.DIGITAL_ALPHA_BASELINE or 0)
+        combined_value = (bedrock_current or 0) + (cb_val or 0)
+        combined_pnl = (combined_value - combined_cost) + (total_pnl or 0)
+        combined_ret = round((combined_pnl / combined_cost) * 100, 2) if combined_cost else None
+    except Exception:
+        combined_pnl = None
+        combined_ret = None
+    combined = {
+        "total_pnl": round(combined_pnl, 2) if combined_pnl is not None else None,
+        "return_pct": combined_ret,
+        "total_value": round(combined_value, 2) if combined_value else None,
+    }
+    return {"bedrock": bedrock, "event_alpha": event_alpha, "digital_alpha": digital_alpha, "combined": combined, "stale": False}
 
 
 # ---------------------------------------------------------------------------
@@ -410,7 +499,7 @@ def _fetch_portfolio():
 
 def _fetch_market():
     tickers = {
-        "equities": ["SPY", "^DJI", "QQQ", "^VIX"],
+        "equities": ["SPY", "^DJI", "QQQ", "^VIX", "^OVX", "^GVZ"],
         "crypto": ["BTC-USD", "ETH-USD", "SOL-USD"],
     }
     all_tks = tickers["equities"] + tickers["crypto"]
@@ -428,6 +517,7 @@ def _fetch_market():
         "crypto": [
             _build("BTC-USD", "BTC"), _build("ETH-USD", "ETH"), _build("SOL-USD", "SOL"),
         ],
+        "volatility": [_build("^OVX", "OVX"), _build("^GVZ", "GVZ")],
         "stale": False,
     }
 
@@ -447,7 +537,7 @@ def _fetch_sentiment():
                 "value": int(current.get("value", 50)),
                 "classification": current.get("value_classification", "Neutral"),
                 "previous_value": int(prev.get("value", 50)) if prev else None,
-                "stale": False,
+        "stale": False,
             }
     except Exception as e:
         log.warning(f"Sentiment fetch failed: {e}")
@@ -543,9 +633,9 @@ def _fetch_equity_curves():
         pass
 
     return {
-        "bedrock": {"portfolio": bedrock_curve, "spy": spy_curve},
-        "event_alpha": ea_curve,
-        "digital_alpha": da_curve,
+        "bedrock": {"portfolio": [p for p in bedrock_curve if p.get("value")==p.get("value")], "spy": [p for p in spy_curve if p.get("value")==p.get("value")]},
+        "event_alpha": [p for p in ea_curve if p.get("value")==p.get("value")],
+        "digital_alpha": [p for p in da_curve if p.get('value') == p.get('value')],
         "stale": False,
     }
 
@@ -602,9 +692,143 @@ def _fetch_scorecard():
     return {"signals": signals, "total": total, "stale": False}
 
 
+
+# ---------------------------------------------------------------------------
+# API: /api/live_quotes  (2-second TTL — powers blinking live prices)
+# ---------------------------------------------------------------------------
+def _fetch_live_quotes():
+    open_pos = read_positions("OPEN")
+    pos_tickers = list(set(p["ticker"] for p in open_pos))
+    market_syms = ["SPY", "QQQ", "DIA", "IWM", "XLE", "XLF", "XLK", "XLV", "UUP"]
+    all_equity_syms = list(set(market_syms + pos_tickers))
+    quotes = {}
+    # Primary: FMP /stable/batch-quote (correct endpoint post-Aug 2025)
+    try:
+        sym_str = ",".join(all_equity_syms)
+        r = requests.get(
+            "https://financialmodelingprep.com/stable/batch-quote?symbols=" + sym_str + "&apikey=" + config.FMP_API_KEY,
+            timeout=6
+        )
+        data = r.json()
+        if isinstance(data, list):
+            for q in data:
+                sym = q.get("symbol", "")
+                price = q.get("price")
+                chg = q.get("changePercentage")  # NOTE: new field name vs old v3
+                quotes[sym] = {
+                    "price": round(float(price), 2) if price else None,
+                    "change_pct": round(float(chg), 2) if chg is not None else None,
+                    "change": round(float(q.get("change", 0) or 0), 2),
+                    "source": "fmp",
+                }
+            log.info(f"Live quotes FMP stable: {len(quotes)} symbols")
+    except Exception as e:
+        log.warning("Live quotes FMP failed: " + str(e))
+    # Crypto: FMP stable batch
+    try:
+        crypto_map = {"BTCUSD": "BTCUSD", "ETHUSD": "ETHUSD", "SOLUSD": "SOLUSD"}
+        cr = requests.get(
+            "https://financialmodelingprep.com/stable/batch-quote?symbols=BTCUSD,ETHUSD,SOLUSD&apikey=" + config.FMP_API_KEY,
+            timeout=4
+        )
+        cdata = cr.json()
+        if isinstance(cdata, list):
+            for q in cdata:
+                sym = q.get("symbol", "")
+                price = q.get("price")
+                chg = q.get("changePercentage")
+                quotes[sym] = {
+                    "price": round(float(price), 2) if price else None,
+                    "change_pct": round(float(chg), 2) if chg is not None else None,
+                    "source": "fmp",
+                }
+    except Exception:
+        pass
+    # Vol indexes + 10Y yield + VIX3M term structure (yfinance — FMP unreliable)
+    try:
+        vol = batch_fetch_prices(["^VIX", "^OVX", "^GVZ", "^TNX", "^VIX3M"])
+        for sym, tk in [("VIX", "^VIX"), ("OVX", "^OVX"), ("GVZ", "^GVZ"),
+                        ("TNX", "^TNX"), ("VIX3M", "^VIX3M")]:
+            if tk in vol and vol[tk]:
+                quotes[sym] = {"price": round(vol[tk], 2), "change_pct": None, "change": None, "source": "yf"}
+    except Exception:
+        pass
+    return {"quotes": quotes, "ts": time.time(), "stale": not quotes, "source": "fmp"}
+
+def _fetch_news():
+    try:
+        r = requests.get(
+            "https://financialmodelingprep.com/api/v3/stock_news?limit=25&apikey=" + config.FMP_API_KEY,
+            timeout=8
+        )
+        items = r.json()
+        if isinstance(items, list):
+            return [{"title": i.get("title", ""), "symbol": i.get("symbol", ""), "ts": i.get("publishedDate", "")} for i in items[:25]]
+    except Exception as e:
+        log.warning("News fetch failed: " + str(e))
+    return []
+
+
+def _fetch_breadth_vol():
+    """Breadth & volatility snapshot: SPY realized vol vs 30d avg, VIX term structure, put/call ratio."""
+    out = {"spy_vol_today": None, "spy_vol_30d_avg": None, "spy_vol_ratio": None,
+           "vix": None, "vix3m": None, "term_ratio": None, "term_state": None,
+           "put_call": None, "stale": True}
+    try:
+        import pandas
+        df = yf.download("SPY", period="90d", interval="1d", progress=False)
+        if df is not None and not df.empty:
+            if isinstance(df.columns, pandas.MultiIndex):
+                df.columns = [c[0] for c in df.columns]
+            closes = df["Close"].dropna()
+            if len(closes) >= 31:
+                rets = closes.pct_change().dropna()
+                # Annualized realized vol: std * sqrt(252)
+                vol_today = float(rets.tail(20).std() * (252 ** 0.5) * 100)
+                vol_avg = float(rets.tail(60).std() * (252 ** 0.5) * 100) if len(rets) >= 60 else vol_today
+                out["spy_vol_today"] = round(vol_today, 2)
+                out["spy_vol_30d_avg"] = round(vol_avg, 2)
+                out["spy_vol_ratio"] = round(vol_today / vol_avg, 2) if vol_avg else None
+    except Exception as e:
+        log.warning("Breadth/vol SPY calc failed: " + str(e))
+    try:
+        vol = batch_fetch_prices(["^VIX", "^VIX3M"])
+        vix = vol.get("^VIX")
+        vix3m = vol.get("^VIX3M")
+        out["vix"] = round(vix, 2) if vix else None
+        out["vix3m"] = round(vix3m, 2) if vix3m else None
+        if vix and vix3m:
+            ratio = vix / vix3m
+            out["term_ratio"] = round(ratio, 3)
+            # <1 = contango (calm); >1 = backwardation (stress)
+            out["term_state"] = "CONTANGO" if ratio < 1 else "BACKWARDATION"
+    except Exception as e:
+        log.warning("Breadth/vol term calc failed: " + str(e))
+    try:
+        # CBOE equity put/call ratio via yfinance proxy — use $CPC if available, else skip
+        import pandas
+        df = yf.download("^CPC", period="5d", interval="1d", progress=False)
+        if df is not None and not df.empty:
+            if isinstance(df.columns, pandas.MultiIndex):
+                df.columns = [c[0] for c in df.columns]
+            last = float(df["Close"].dropna().iloc[-1])
+            out["put_call"] = round(last, 2)
+    except Exception:
+        pass
+    out["stale"] = out["spy_vol_today"] is None and out["vix"] is None
+    return out
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+@app.route("/api/live_quotes")
+def api_live_quotes():
+    return jsonify(cached("live_quotes", 2, _fetch_live_quotes))
+
+@app.route("/api/news")
+def api_news():
+    return jsonify(cached("news", 60, _fetch_news))
 
 @app.route("/")
 def index():
@@ -644,6 +868,11 @@ def api_equity_curves():
 @app.route("/api/scorecard")
 def api_scorecard():
     return jsonify(cached("scorecard", 300, _fetch_scorecard))
+
+
+@app.route("/api/breadth_vol")
+def api_breadth_vol():
+    return jsonify(cached("breadth_vol", 300, _fetch_breadth_vol))
 
 
 # ---------------------------------------------------------------------------

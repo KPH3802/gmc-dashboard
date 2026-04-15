@@ -40,6 +40,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;overf
 .card-red{border-top:3px solid var(--red)}
 .card h3{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);margin-bottom:6px}
 .big-num{font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700}
+.day-change{font-size:12px;margin-top:2px}
 .sub-text{font-size:10px;color:var(--muted);margin-top:3px}
 .pos{color:var(--green)}
 .neg{color:var(--neg)}
@@ -109,16 +110,19 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;overf
       <div class="card card-red">
         <h3>Bedrock</h3>
         <div class="big-num" id="bedrockRet">--</div>
+        <div class="day-change mono" id="bedrockDay">--</div>
         <div class="sub-text" id="bedrockSub">Loading...</div>
       </div>
       <div class="card card-red">
         <h3>Event Alpha</h3>
         <div class="big-num" id="eaRet">--</div>
+        <div class="day-change mono" id="eaDay">--</div>
         <div class="sub-text" id="eaSub">Loading...</div>
       </div>
       <div class="card card-red">
         <h3>Digital Alpha</h3>
         <div class="big-num" id="daRet">--</div>
+        <div class="day-change mono" id="daDay">--</div>
         <div class="sub-text" id="daSub">Loading...</div>
       </div>
       <div class="card card-red">
@@ -348,6 +352,11 @@ function pctHtml(v,mono=true){
   return `<span class="${cls} ${mc}">${sign}${v.toFixed(2)}%</span>`;
 }
 function dollarHtml(v){if(v==null)return '--';return '$'+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function dayChangeHtml(dollar,pct){
+  if(dollar==null||pct==null)return '<span class="stale">--</span>';
+  const cls=dollar>=0?'pos':'neg',sign=dollar>=0?'+':'-';
+  return `<span class="${cls}">Today: ${sign}$${Math.abs(dollar).toFixed(2)} (${pct>=0?'+':''}${pct.toFixed(2)}%)</span>`;
+}
 function chgHtml(v){
   if(v==null)return '';
   const cls=v>=0?'pos':'neg',sign=v>=0?'+':'';
@@ -494,16 +503,19 @@ function updatePortfolio(d){
   const b=d.bedrock;
   if(b){
     document.getElementById('bedrockRet').innerHTML=pctHtml(b.return_pct,false);
+    document.getElementById('bedrockDay').innerHTML=dayChangeHtml(b.day_change_dollar,b.day_change_pct);
     document.getElementById('bedrockSub').innerHTML=`Cost ${dollarHtml(b.cost_basis)} &middot; Val ${dollarHtml(b.current_value)} &middot; SPY ${pctHtml(b.spy_return_pct)}`;
   }
   const ea=d.event_alpha;
   if(ea){
     document.getElementById('eaRet').innerHTML=dollarHtml(ea.total_pnl);
+    document.getElementById('eaDay').innerHTML=ea.day_pnl!=null?`<span class="${ea.day_pnl>=0?'pos':'neg'}">Today: ${ea.day_pnl>=0?'+':''}$${Math.abs(ea.day_pnl).toFixed(2)}</span>`:'<span class="stale">--</span>';
     document.getElementById('eaSub').innerHTML=`${ea.open_positions||0} open &middot; ${ea.closed_trades||0} closed &middot; Win ${ea.win_rate!=null?ea.win_rate.toFixed(0)+'%':'--'}`;
   }
   const da=d.digital_alpha;
   if(da){
     document.getElementById('daRet').innerHTML=pctHtml(da.return_pct,false);
+    document.getElementById('daDay').innerHTML=da.day_change_pct!=null?`<span class="${da.day_change_pct>=0?'pos':'neg'}">Today: ${da.day_change_pct>=0?'+':''}${da.day_change_pct.toFixed(2)}%</span>`:'<span class="stale">--</span>';
     document.getElementById('daSub').innerHTML=`Cost ${dollarHtml(da.cost_basis)} &middot; Val ${dollarHtml(da.current_value)}`;
   }
   const gmc=d.combined;
