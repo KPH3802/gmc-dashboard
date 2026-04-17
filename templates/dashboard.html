@@ -258,10 +258,9 @@ function toggleAudio(){
   const btn=document.getElementById('audioBtn');
   if(audioEnabled){
     if(!audioCtx){try{audioCtx=new (window.AudioContext||window.webkitAudioContext)();}catch(e){audioEnabled=false;return;}}
-    if(audioCtx.state==='suspended')audioCtx.resume();
     btn.classList.remove('off');btn.classList.add('on');
     btn.innerHTML='&#128266;';btn.title='Mute sounds';
-    playEntryChime();
+    if(audioCtx.state==='suspended'){audioCtx.resume().then(()=>playEntryChime());}else{playEntryChime();}
   }else{
     btn.classList.remove('on');btn.classList.add('off');
     btn.innerHTML='&#128263;';btn.title='Enable sound';
