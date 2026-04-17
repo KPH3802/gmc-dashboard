@@ -6,6 +6,7 @@ Auto-refreshing trading dashboard for Grist Mill Capital.
 
 import json
 import logging
+import math
 import os
 import sqlite3
 import threading
@@ -85,6 +86,7 @@ def fetch_price(ticker, timeout=10):
     """yfinance -> Yahoo direct -> FMP. Returns float or None."""
     import pandas
     result = [None]
+    yf_error = [None]
 
     def _yf():
         try:
@@ -94,8 +96,8 @@ def fetch_price(ticker, timeout=10):
                 if isinstance(hist.columns, pandas.MultiIndex):
                     hist.columns = [c[0] for c in hist.columns]
                 result[0] = float(hist["Close"].iloc[-1])
-        except Exception:
-            pass
+        except Exception as e:
+            yf_error[0] = e
 
     t = threading.Thread(target=_yf, daemon=True)
     t.start()
@@ -103,24 +105,33 @@ def fetch_price(ticker, timeout=10):
     if result[0] is not None:
         return result[0]
 
+    yf_err = str(yf_error[0])[:100].strip().replace("\n", " ") if yf_error[0] else "timeout_or_empty"
+    yahoo_price = None
     try:
         encoded = requests.utils.quote(ticker)
         r = requests.get(
             f"https://query1.finance.yahoo.com/v8/finance/chart/{encoded}",
             headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
-        return float(r.json()["chart"]["result"][0]["meta"]["regularMarketPrice"])
+        yahoo_price = float(r.json()["chart"]["result"][0]["meta"]["regularMarketPrice"])
     except Exception:
         pass
+    log.warning(f"[FALLBACK] source=price_fetch primary=yfinance primary_error={yf_err} fallback=yahoo_direct result={'ok' if yahoo_price is not None else 'fail'}")
+    if yahoo_price is not None:
+        return yahoo_price
 
+    fmp_price = None
     try:
         r = requests.get(
             f"https://financialmodelingprep.com/api/v3/quote/{ticker}?apikey={config.FMP_API_KEY}",
             timeout=8)
         data = r.json()
         if data and isinstance(data, list) and "price" in data[0]:
-            return float(data[0]["price"])
+            fmp_price = float(data[0]["price"])
     except Exception:
         pass
+    log.warning(f"[FALLBACK] source=price_fetch primary=yahoo_direct primary_error=yahoo_direct_failed fallback=fmp result={'ok' if fmp_price is not None else 'fail'}")
+    if fmp_price is not None:
+        return fmp_price
     return None
 
 
@@ -166,11 +177,17 @@ def batch_fetch_prices(tickers, timeout=20):
         except Exception:
             pass
 
+    batch_fallback_used = False
     for tk in unique:
         if tk not in prices or prices[tk] is None:
+            batch_fallback_used = True
             p = fetch_price(tk)
             if p is not None:
                 prices[tk] = p
+    if batch_fallback_used:
+        n_ok = sum(1 for tk in unique if prices.get(tk) is not None)
+        batch_err = "df_none" if df is None else "missing_symbols_in_batch"
+        log.warning(f"[FALLBACK] source=batch_yfinance_prices primary=yf_batch primary_error={batch_err} fallback=per_ticker result={'ok' if n_ok > 0 else 'fail'}")
     return prices
 
 
@@ -428,6 +445,9 @@ def _fetch_portfolio():
                     cached_val = float(f.read().strip())
         except Exception:
             cached_val = None
+        log.warning(f"[FALLBACK] source=ea_account_value primary=ib_gateway primary_error=ib_gateway_unreachable fallback=cache_file result={'ok' if cached_val else 'fail'}")
+        if not cached_val:
+            log.warning(f"[FALLBACK] source=ea_account_value primary=cache_file primary_error=no_cached_value fallback=config_hardcode result=ok")
         ea_acct = cached_val if cached_val else config.EVENT_ALPHA_FALLBACK
         ea_source = "cache" if cached_val else "fallback"
     ea_ret = round((total_pnl / ea_acct) * 100, 2) if ea_acct else None
@@ -467,15 +487,23 @@ def _fetch_portfolio():
         try:
             import pandas
             df = yf.download("SPY", start=ea_benchmark_date,
-                             end=(today + timedelta(days=1)).isoformat(), progress=False)
-            if df is not None and not df.empty:
+                             end=(today + timedelta(days=1)).isoformat(), progress=False, auto_adjust=True)
+            if df is None or df.empty:
+                log.warning(f"[FALLBACK] source=ea_spy_return primary=yfinance primary_error=empty_dataframe fallback=none result=none_available")
+                ea_spy_ret = None
+            else:
                 if isinstance(df.columns, pandas.MultiIndex):
                     df.columns = [c[0] for c in df.columns]
                 spy_s = float(df["Close"].iloc[0])
                 spy_e = float(df["Close"].iloc[-1])
-                ea_spy_ret = round(((spy_e - spy_s) / spy_s) * 100, 2)
-        except Exception:
-            pass
+                if (spy_s is None or spy_e is None or spy_s <= 0 or spy_e <= 0
+                    or math.isnan(spy_s) or math.isnan(spy_e)):
+                    log.warning(f"[FALLBACK] source=ea_spy_return primary=yfinance primary_error=invalid_data_spy_s={spy_s}_spy_e={spy_e} fallback=none result=none_available")
+                    ea_spy_ret = None
+                else:
+                    ea_spy_ret = round(((spy_e - spy_s) / spy_s) * 100, 2)
+        except Exception as e:
+            log.warning(f"[FALLBACK] source=ea_spy_return primary=yfinance primary_error={str(e)[:100].strip().replace(chr(10), ' ')} fallback=none result=none_available")
 
     event_alpha = {
         "name": "Event Alpha", "account_value": ea_acct,
@@ -537,6 +565,7 @@ def _fetch_portfolio():
                     log.warning(f"DA daily change FMP failed: {e}")
                 for sym in crypto_syms:
                     if sym not in crypto_changes:
+                        yf_ok = False
                         try:
                             yf_sym = sym[:-3] + "-USD"
                             tk = yf.Ticker(yf_sym)
@@ -544,8 +573,10 @@ def _fetch_portfolio():
                             cur = tk.fast_info.get("lastPrice")
                             if prev and cur and prev > 0:
                                 crypto_changes[sym] = round(((cur - prev) / prev) * 100, 2)
+                                yf_ok = True
                         except Exception:
                             pass
+                        log.warning(f"[FALLBACK] source=digital_alpha_daily_change primary=fmp primary_error=missing_symbol_{sym} fallback=yfinance result={'ok' if yf_ok else 'fail'}")
                 weighted_sum = 0.0
                 total_weight = 0.0
                 for sym in crypto_syms:
@@ -928,6 +959,7 @@ def _fetch_breadth_vol():
         log.warning(f"SPY vol FMP failed: {e}")
 
     if out["spy_vol_today"] is None:
+        yf_ok = False
         try:
             import pandas
             df = yf.download("SPY", period="90d", interval="1d", progress=False)
@@ -940,8 +972,10 @@ def _fetch_breadth_vol():
                     out["spy_vol_today"] = v20
                     out["spy_vol_30d_avg"] = v60
                     out["spy_vol_ratio"] = ratio
+                    yf_ok = True
         except Exception as e:
             log.warning(f"SPY vol yfinance fallback failed: {e}")
+        log.warning(f"[FALLBACK] source=spy_realized_vol primary=fmp primary_error=fmp_returned_no_data fallback=yfinance result={'ok' if yf_ok else 'fail'}")
 
     # --- VIX Term Structure (keep existing approach) ---
     try:
