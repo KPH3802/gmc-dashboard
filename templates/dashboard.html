@@ -489,6 +489,12 @@ function chgHtml(v){
   const cls=v>=0?'pos':'neg',sign=v>=0?'+':'';
   return `<span class="${cls} mono" style="font-size:10px">${sign}${v.toFixed(2)}%</span>`;
 }
+function fmtPrice(n){
+  if(n==null||isNaN(n))return'--';
+  if(n<0.01)return n.toFixed(6);
+  if(n<1)return n.toFixed(4);
+  return n.toFixed(2);
+}
 function flash(el,dir){
   if(!el)return;
   el.classList.remove('flash-up','flash-down');
@@ -546,7 +552,7 @@ function applyLiveQuotes(quotes){
         playTick(dir);
       }
       prevPrices[tk]=newPrice;
-      priceEl.textContent='$'+newPrice.toFixed(2);
+      priceEl.textContent='$'+fmtPrice(newPrice);
       const entry=parseFloat(row.getAttribute('data-entry'));
       const dir=row.getAttribute('data-dir');
       const posSize=parseFloat(row.getAttribute('data-size'))||0;
@@ -657,10 +663,11 @@ function updatePortfolio(d){
   const ea=d.event_alpha;
   if(ea){
     document.getElementById('eaRet').innerHTML=pctHtml(ea.return_pct,false);
-    const pnlStr=ea.total_pnl!=null?`P&L: <span class="${ea.total_pnl>=0?'pos':'neg'}">${ea.total_pnl>=0?'+':''}$${Math.abs(ea.total_pnl).toFixed(2)}</span>`:'';
-    const dayStr=ea.day_pnl!=null?` &middot; Today: <span class="${ea.day_pnl>=0?'pos':'neg'}">${ea.day_pnl>=0?'+':''}$${Math.abs(ea.day_pnl).toFixed(2)}</span>`:'';
-    document.getElementById('eaDay').innerHTML=pnlStr+dayStr||'<span class="stale">--</span>';
-    let eaSubStr=`${ea.open_positions||0} open &middot; ${ea.closed_trades||0} closed`;
+    const pnlStr=ea.total_pnl!=null?`<span class="${ea.total_pnl>=0?'pos':'neg'}">${ea.total_pnl>=0?'+':''}$${Math.abs(ea.total_pnl).toFixed(2)} P&L</span>`:'<span class="stale">--</span>';
+    document.getElementById('eaDay').innerHTML=pnlStr;
+    let eaSubStr='';
+    if(ea.day_pnl!=null)eaSubStr+=`Today: <span class="${ea.day_pnl>=0?'pos':'neg'}">${ea.day_pnl>=0?'+':''}$${Math.abs(ea.day_pnl).toFixed(2)}</span> &middot; `;
+    eaSubStr+=`${ea.open_positions||0} open &middot; ${ea.closed_trades||0} closed`;
     if(ea.ea_spy_return_pct!=null)eaSubStr+=` &middot; SPY since 1st trade ${pctHtml(ea.ea_spy_return_pct)}`;
     document.getElementById('eaSub').innerHTML=eaSubStr;
   }
@@ -701,7 +708,7 @@ function updatePositions(d){
     const dayStr=p.days_held!=null&&p.expected_hold_days?`${p.days_held}/${p.expected_hold_days}`:(p.days_held!=null?String(p.days_held):'--');
     const leftStr=p.days_remaining!=null?`${p.days_remaining}d`:'--';
     const stale=p.stale?'<span class="stale"> &#9888;</span>':'';
-    const curPrice=p.current_price?'$'+p.current_price.toFixed(2):'--';
+    const curPrice=p.current_price!=null?'$'+fmtPrice(p.current_price):'--';
     let entryStr=p.entry_date||'--';
     if(p.entry_date&&p.entry_date.length===10){const pts=p.entry_date.split('-');entryStr=_months[parseInt(pts[1])-1]+'-'+pts[2];}
     const pnlDollar=(p.return_pct!=null&&p.position_size)?(p.return_pct/100)*p.position_size:null;
@@ -711,7 +718,7 @@ function updatePositions(d){
       <td style="font-family:Inter;font-size:9px;color:var(--muted)">${p.source||''}</td>
       <td><span class="${dirCls}">${dirLbl}</span></td>
       <td>${entryStr}</td>
-      <td>${p.entry_price?'$'+p.entry_price.toFixed(2):'--'}</td>
+      <td>${p.entry_price!=null?'$'+fmtPrice(p.entry_price):'--'}</td>
       <td class="live-price">${curPrice}</td>
       <td class="live-return">${pctHtml(p.return_pct)}</td>
       <td class="live-pnl">${pnlStr}</td>

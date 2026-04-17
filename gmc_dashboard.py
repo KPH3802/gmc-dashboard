@@ -34,6 +34,15 @@ def _market_ttl(fast=5, slow=60):
             return fast
     return 300
 
+def _round_price(p):
+    if p is None:
+        return None
+    if p < 0.01:
+        return round(p, 6)
+    if p < 1:
+        return round(p, 4)
+    return round(p, 2)
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
@@ -312,9 +321,9 @@ def _fetch_positions():
 
         result.append({
             "ticker": tk, "source": source, "direction": direction,
-            "entry_date": p["entry_date"], "entry_price": round(entry_price, 2),
+            "entry_date": p["entry_date"], "entry_price": _round_price(entry_price),
             "shares": p["shares"], "position_size": p["position_size"],
-            "current_price": round(current, 2) if current else None,
+            "current_price": _round_price(current),
             "return_pct": return_pct,
             "expected_return_pct": exp_ret, "expected_hold_days": exp_hold,
             "days_held": days_held, "days_remaining": days_remaining,
@@ -495,8 +504,9 @@ def _fetch_portfolio():
     except Exception:
         pass
 
-    # Digital Alpha daily change — FMP batch-quote for each crypto position
+    # Digital Alpha daily change — FMP primary, yfinance fallback
     da_day_change_pct = None
+    crypto_changes = {}
     try:
         if cb_pos and cb_val and cb_val > 0:
             crypto_syms = []
@@ -510,23 +520,45 @@ def _fetch_portfolio():
                 crypto_syms.append(sym)
                 crypto_vals[sym] = usd_val
             if crypto_syms:
-                sym_str = ",".join(crypto_syms)
-                r = requests.get(
-                    f"https://financialmodelingprep.com/stable/batch-quote?symbols={sym_str}&apikey={config.FMP_API_KEY}",
-                    timeout=6)
-                if r.status_code == 200:
-                    data = r.json()
-                    if isinstance(data, list):
-                        weighted_sum = 0.0
-                        total_weight = 0.0
-                        for q in data:
-                            sym = q.get("symbol", "")
-                            chg = q.get("changePercentage")
-                            if sym in crypto_vals and chg is not None:
-                                weighted_sum += float(chg) * crypto_vals[sym]
-                                total_weight += crypto_vals[sym]
-                        if total_weight > 0:
-                            da_day_change_pct = round(weighted_sum / total_weight, 2)
+                try:
+                    sym_str = ",".join(crypto_syms)
+                    r = requests.get(
+                        f"https://financialmodelingprep.com/stable/batch-quote?symbols={sym_str}&apikey={config.FMP_API_KEY}",
+                        timeout=6)
+                    if r.status_code == 200:
+                        data = r.json()
+                        if isinstance(data, list):
+                            for q in data:
+                                sym = q.get("symbol", "")
+                                chg = q.get("changePercentage")
+                                if chg is not None:
+                                    crypto_changes[sym] = round(float(chg), 2)
+                except Exception as e:
+                    log.warning(f"DA daily change FMP failed: {e}")
+                for sym in crypto_syms:
+                    if sym not in crypto_changes:
+                        try:
+                            yf_sym = sym[:-3] + "-USD"
+                            tk = yf.Ticker(yf_sym)
+                            prev = tk.fast_info.get("previousClose")
+                            cur = tk.fast_info.get("lastPrice")
+                            if prev and cur and prev > 0:
+                                crypto_changes[sym] = round(((cur - prev) / prev) * 100, 2)
+                        except Exception:
+                            pass
+                weighted_sum = 0.0
+                total_weight = 0.0
+                for sym in crypto_syms:
+                    if sym in crypto_changes and sym in crypto_vals:
+                        weighted_sum += crypto_changes[sym] * crypto_vals[sym]
+                        total_weight += crypto_vals[sym]
+                if total_weight > 0:
+                    da_day_change_pct = round(weighted_sum / total_weight, 2)
+            for pos in cb_pos:
+                currency = pos.get("currency", "")
+                sym = f"{currency}USD"
+                if sym in crypto_changes:
+                    pos["day_change_pct"] = crypto_changes[sym]
     except Exception:
         da_day_change_pct = None
 
