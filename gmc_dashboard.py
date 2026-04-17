@@ -878,8 +878,9 @@ def _fetch_live_quotes():
                 price = q.get("price")
                 chg = q.get("changePercentage")
                 quotes[sym] = {
-                    "price": round(float(price), 2) if price else None,
+                    "price": _round_price(float(price)) if price else None,
                     "change_pct": round(float(chg), 2) if chg is not None else None,
+                    "change": round(float(q.get("change", 0) or 0), 2),
                     "source": "fmp",
                 }
     except Exception:
@@ -891,6 +892,14 @@ def _fetch_live_quotes():
                         ("TNX", "^TNX"), ("VIX3M", "^VIX3M")]:
             if tk in vol and vol[tk]:
                 quotes[sym] = {"price": round(vol[tk], 2), "change_pct": None, "change": None, "source": "yf"}
+        # 10Y daily change in basis points (prev close -> current); stored in `change`
+        try:
+            if "TNX" in quotes and quotes["TNX"]["price"] is not None:
+                prev = yf.Ticker("^TNX").fast_info.get("previousClose")
+                if prev is not None:
+                    quotes["TNX"]["change"] = round((quotes["TNX"]["price"] - float(prev)) * 100, 1)
+        except Exception:
+            pass
     except Exception:
         pass
     return {"quotes": quotes, "ts": time.time(), "stale": not quotes, "source": "fmp"}
