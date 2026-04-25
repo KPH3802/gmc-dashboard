@@ -5,3 +5,15 @@ dashboard_error.log
 __pycache__/
 .DS_Store
 *.db
+
+# Local backups (Apr 24 2026 hardening Ñ never commit *.bak, working backups, or Claude Code session memory)
+*.bak
+*.bak_*
+*_backup.py
+*_backup.html
+*_pre_lunch.py
+*_pre_lunch.html
+*_prelunch_backup.html
+*_pre_move
+CLAUDE.md
+*_backup*.html
