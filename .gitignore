@@ -17,3 +17,4 @@ __pycache__/
 *_pre_move
 CLAUDE.md
 *_backup*.html
+*.log
